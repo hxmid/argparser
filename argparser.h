@@ -166,24 +166,20 @@ extern "C" {
         char** argv;
         size_t argv_length;
         size_t argv_capacity;
-    } argparser_t;
+    } argparser_inner_t, * argparser_t;
 
-    void argparser_deinit( argparser_t* argparser ) {
+    void argparser_free( argparser_inner_t* argparser ) {
         if ( argparser->args ) {
             for ( size_t i = 0; i < argparser->args_length; i++ ) {
                 arg_deinit( &argparser->args[i] );
             }
 
             free( argparser->args );
-            argparser->args = NULL;
         }
 
-        argparser->args_capacity = 0;
-        argparser->args_length = 0;
 
         if ( argparser->program_name ) {
             free( argparser->program_name );
-            argparser->program_name = NULL;
         }
 
         while ( argparser->usage ) {
@@ -197,17 +193,13 @@ extern "C" {
                 free( argparser->argv[i] );
             }
             free( argparser->argv );
-            argparser->argv = NULL;
         }
 
-        argparser->argv_length = 0;
-        argparser->argv_capacity = 0;
-
-        argparser->argc = 0;
+        free( argparser );
     }
 
     void argparser_add_inner(
-        argparser_t* argparser,
+        argparser_inner_t* argparser,
         const char* identifier,
         const char* description,
         bool required,
@@ -229,14 +221,14 @@ extern "C" {
             argparser->args_capacity = 1;
             argparser->args = (arg_t*)calloc( 1, sizeof( arg_t ) );
             if ( !argparser->args ) {
-                fprintf( stderr, "[FATAL]: could not allocate memory for first arg_t in `argparser_t.args`\n" );
+                fprintf( stderr, "[FATAL]: could not allocate memory for first arg_t in `argparser_inner_t.args`\n" );
                 exit( EXIT_FAILURE );
             }
         } else if ( argparser->args_length == argparser->args_capacity ) {
             argparser->args_capacity <<= 1;
             arg_t* reallocation = (arg_t*)realloc( argparser->args, argparser->args_capacity * sizeof( arg_t ) );
             if ( !reallocation ) {
-                fprintf( stderr, "[FATAL]: could not reallocate memory for `argparser_t.args`\n" );
+                fprintf( stderr, "[FATAL]: could not reallocate memory for `argparser_inner_t.args`\n" );
                 exit( EXIT_FAILURE );
             }
             argparser->args = reallocation;
@@ -310,42 +302,42 @@ extern "C" {
 #define argparser_add(argparser, identifier, description, required, arg_count, type, ...) \
         argparser_add_inner(argparser, identifier, description, required, arg_count, type, __VA_ARGS__, NULL)
 
-    argparser_t argparser_init_inner( char* program_name, char* usages, ... ) {
-        argparser_t argparser;
-        argparser.program_name = strdup( program_name );
-        if ( !argparser.program_name ) {
-            fprintf( stderr, "[FATAL]: could not allocate memory for `argparser_t.program_name`\n" );
+    argparser_inner_t* argparser_create_inner( char* program_name, char* usages, ... ) {
+        argparser_inner_t* argparser = (argparser_inner_t*)calloc( 1, sizeof( argparser_inner_t ) );
+        argparser->program_name = strdup( program_name );
+        if ( !argparser->program_name ) {
+            fprintf( stderr, "[FATAL]: could not allocate memory for `argparser_inner_t.program_name`\n" );
             exit( EXIT_FAILURE );
         }
 
-        argparser.args = NULL;
-        argparser.args_capacity = 0;
-        argparser.args_length = 0;
-        argparser.usage = NULL;
+        argparser->args = NULL;
+        argparser->args_capacity = 0;
+        argparser->args_length = 0;
+        argparser->usage = NULL;
 
         va_list parameters;
         va_start( parameters, usages );
         while ( usages ) {
             usage_node_t node = usage_node_create( usages );
-            node->next = argparser.usage;
-            argparser.usage = node;
+            node->next = argparser->usage;
+            argparser->usage = node;
             usages = va_arg( parameters, char* );
         }
 
-        argparser.argc = 0;
+        argparser->argc = 0;
 
-        argparser.argv = NULL;
-        argparser.argv_length = 0;
-        argparser.argv_capacity = 0;
+        argparser->argv = NULL;
+        argparser->argv_length = 0;
+        argparser->argv_capacity = 0;
 
-        argparser_add_inner( &argparser, "help", "prints the usage for the program", false, 0, ARG_TYPE_NONE, "--help", "-h", NULL );
+        argparser_add_inner( argparser, "help", "prints the usage for the program", false, 0, ARG_TYPE_NONE, "--help", "-h", NULL );
         return argparser;
     }
 
-#define argparser_init(program_name, ...) \
-    argparser_init_inner(program_name, __VA_ARGS__, NULL)
+#define argparser_create(program_name, ...) \
+    argparser_create_inner(program_name, __VA_ARGS__, NULL)
 
-    void argparser_print_usage( argparser_t* argparser ) {
+    void argparser_print_usage( argparser_inner_t* argparser ) {
         printf( "usage: " );
         usage_node_t usage = argparser->usage;
 
@@ -371,7 +363,7 @@ extern "C" {
         }
     }
 
-    int argparser_parse( argparser_t* argparser, int argc, char** argv ) {
+    int argparser_parse( argparser_inner_t* argparser, int argc, char** argv ) {
 
         for ( size_t i = 1; i < argc; i++ ) {
             bool found = false;
@@ -396,20 +388,20 @@ extern "C" {
             if ( !found ) {
                 if ( argv[i][0] == '-' ) {
                     fprintf( stderr, "[ERROR]: unknown argument `%s` at position `%zu`\n", argv[i], i );
-                    argparser_deinit( argparser );
+                    argparser_free( argparser );
                     return 1;
                 } else if ( argparser->argv_capacity == 0 ) {
                     argparser->argv_capacity = 1;
                     argparser->argv = (char**)calloc( 1, sizeof( char* ) );
                     if ( argparser->argv == NULL ) {
-                        fprintf( stderr, "[FATAL]: could not allocate memory for argparser_t.argv\n" );
+                        fprintf( stderr, "[FATAL]: could not allocate memory for argparser_inner_t.argv\n" );
                         exit( EXIT_FAILURE );
                     }
                 } else if ( argparser->argc == argparser->argv_capacity ) {
                     argparser->argv_capacity <<= 1;
                     char** reallocation = (char**)realloc( argparser->argv, argparser->argv_capacity * sizeof( char* ) );
                     if ( !reallocation ) {
-                        fprintf( stderr, "[FATAL]: could not reallocate memory for argparser_t.argv\n" );
+                        fprintf( stderr, "[FATAL]: could not reallocate memory for argparser_inner_t.argv\n" );
                         exit( EXIT_FAILURE );
                     }
 
@@ -417,13 +409,13 @@ extern "C" {
                 }
                 argparser->argv[argparser->argc] = strdup( argv[i] );
                 if ( !argparser->argv[argparser->argc] ) {
-                    fprintf( stderr, "[FATAL]: could not duplicate string for argparser_t.argv\n" );
+                    fprintf( stderr, "[FATAL]: could not duplicate string for argparser_inner_t.argv\n" );
                 }
                 argparser->argc += 1;
 
             } else if ( argparser->args[index].found ) {
                 fprintf( stderr, "[ERROR]: redefinition of argument `%s` at position `%zu`\n", argparser->args[index].meta.identifier, i );
-                argparser_deinit( argparser );
+                argparser_free( argparser );
                 return 1;
 
             } else if ( argparser->args[index].meta.type == ARG_TYPE_NONE ) {
@@ -434,7 +426,7 @@ extern "C" {
                     if ( i + j + 1 >= argc ) {
                         fprintf( stderr, "[FATAL]: missing value for argument `%s` at position %zu\n", argparser->args[index].meta.identifier, i + j + 1 );
                         argparser_print_usage( argparser );
-                        argparser_deinit( argparser );
+                        argparser_free( argparser );
                         return 1;
                     }
                     char* end = NULL;
@@ -491,7 +483,7 @@ extern "C" {
                                 argparser->args[index].values[j].b = false;
                             } else {
                                 fprintf( stderr, "[FATAL]: invalid boolean value `%s` at position %zu\n", argv[i + j + 1], i + j + 1 );
-                                argparser_deinit( argparser );
+                                argparser_free( argparser );
                                 return 1;
                             }
                             break;
@@ -499,7 +491,7 @@ extern "C" {
                     case ARG_TYPE_STRING: {
                             argparser->args[index].values[j].str = strdup( argv[i + j + 1] );
                             if ( !argparser->args[index].values[j].str ) {
-                                fprintf( stderr, "[FATAL]: could not allocate memory for argparser_t.args[%zu].values[%zu].str\n", index, j );
+                                fprintf( stderr, "[FATAL]: could not allocate memory for argparser_inner_t.args[%zu].values[%zu].str\n", index, j );
                                 exit( EXIT_FAILURE );
                             }
                             break;
@@ -511,7 +503,7 @@ extern "C" {
                         }
                     }
 
-                    // NOTE(h): these types don't use char* end, so we can just skip over this check for them
+                    // NOTE(hamid): these types don't use char* end, so we can just skip over this check for them
                     if ( argparser->args[index].meta.type != ARG_TYPE_STRING &&
                         argparser->args[index].meta.type != ARG_TYPE_BOOL &&
                         argparser->args[index].meta.type != ARG_TYPE_U8 &&
@@ -519,7 +511,7 @@ extern "C" {
                         if ( end == NULL || *end != '\0' ) {
                             fprintf( stderr, "[FATAL]: invalid argument at position %zu\n", i + j + 1 );
                             argparser_print_usage( argparser );
-                            argparser_deinit( argparser );
+                            argparser_free( argparser );
                             return 1;
                         }
                     }
@@ -534,7 +526,7 @@ extern "C" {
             if ( !argparser->args[i].found && argparser->args[i].meta.required ) {
                 fprintf( stderr, "[FATAL]: missing required argument `%s`\n", argparser->args[i].meta.identifier );
                 argparser_print_usage( argparser );
-                argparser_deinit( argparser );
+                argparser_free( argparser );
                 return 1;
             }
         }
@@ -542,7 +534,7 @@ extern "C" {
     }
 
 #define DEFINE_ARGPARSER_GETTER(TYPE, FIELD, ENUM_TYPE)                                                         \
-TYPE argparser_get_##FIELD(argparser_t* argparser, const char* identifier, size_t index) {                      \
+TYPE argparser_get_##FIELD(argparser_inner_t* argparser, const char* identifier, size_t index) {                      \
     for (size_t i = 0; i < argparser->args_length; i++) {                                                       \
         if (!strcmp(argparser->args[i].meta.identifier, identifier)) {                                          \
             if (index >= argparser->args[i].values_len) {                                                       \
@@ -571,7 +563,7 @@ TYPE argparser_get_##FIELD(argparser_t* argparser, const char* identifier, size_
     DEFINE_ARGPARSER_GETTER( bool, b, ARG_TYPE_BOOL );
     DEFINE_ARGPARSER_GETTER( char*, str, ARG_TYPE_STRING );
 
-    bool argparser_get_none( argparser_t* argparser, const char* identifier ) {
+    bool argparser_get_none( argparser_inner_t* argparser, const char* identifier ) {
         for ( size_t i = 0; i < argparser->args_length; i++ ) {
             if ( !strcmp( argparser->args[i].meta.identifier, identifier ) ) {
                 if ( argparser->args[i].meta.type != ARG_TYPE_NONE ) {
@@ -584,7 +576,7 @@ TYPE argparser_get_##FIELD(argparser_t* argparser, const char* identifier, size_
         exit( EXIT_FAILURE );
     }
 
-    bool argparser_found( argparser_t* argparser, const char* identifier ) {
+    bool argparser_found( argparser_inner_t* argparser, const char* identifier ) {
         for ( size_t i = 0; i < argparser->args_length; i++ ) {
             if ( !strcmp( argparser->args[i].meta.identifier, identifier ) ) {
                 return argparser->args[i].found;
