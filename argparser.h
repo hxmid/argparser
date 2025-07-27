@@ -431,6 +431,12 @@ extern "C" {
 
             } else {
                 for ( size_t j = 0; j < argparser->args[index].values_len; j++ ) {
+                    if ( i + j + 1 >= argc ) {
+                        fprintf( stderr, "[FATAL]: missing value for argument `%s` at position %zu\n", argparser->args[index].meta.identifier, i + j + 1 );
+                        argparser_print_usage( argparser );
+                        argparser_deinit( argparser );
+                        return 1;
+                    }
                     char* end = NULL;
 
                     switch ( argparser->args[index].meta.type ) {
@@ -535,6 +541,59 @@ extern "C" {
         return 0;
     }
 
+#define DEFINE_ARGPARSER_GETTER(TYPE, FIELD, ENUM_TYPE)                                                         \
+TYPE argparser_get_##FIELD(argparser_t* argparser, const char* identifier, size_t index) {                      \
+    for (size_t i = 0; i < argparser->args_length; i++) {                                                       \
+        if (!strcmp(argparser->args[i].meta.identifier, identifier)) {                                          \
+            if (index >= argparser->args[i].values_len) {                                                       \
+                fprintf(stderr, "[FATAL]: index %zu is out of range for argument %s\n", index, identifier);     \
+                exit(EXIT_FAILURE);                                                                             \
+            } else if (argparser->args[i].meta.type != ENUM_TYPE) {                                             \
+                fprintf(stderr, "[WARNING]: getting " #FIELD " from non-" #FIELD " argument %s\n", identifier); \
+            }                                                                                                   \
+            return argparser->args[i].values[index].FIELD;                                                      \
+        }                                                                                                       \
+    }                                                                                                           \
+    fprintf(stderr, "[FATAL]: argument %s not found\n", identifier);                                            \
+    exit(EXIT_FAILURE);                                                                                         \
+}
+
+    DEFINE_ARGPARSER_GETTER( uint64_t, u64, ARG_TYPE_U64 );
+    DEFINE_ARGPARSER_GETTER( int64_t, i64, ARG_TYPE_I64 );
+    DEFINE_ARGPARSER_GETTER( double, f64, ARG_TYPE_F64 );
+    DEFINE_ARGPARSER_GETTER( uint32_t, u32, ARG_TYPE_U32 );
+    DEFINE_ARGPARSER_GETTER( int32_t, i32, ARG_TYPE_I32 );
+    DEFINE_ARGPARSER_GETTER( float, f32, ARG_TYPE_F32 );
+    DEFINE_ARGPARSER_GETTER( uint16_t, u16, ARG_TYPE_U16 );
+    DEFINE_ARGPARSER_GETTER( int16_t, i16, ARG_TYPE_I16 );
+    DEFINE_ARGPARSER_GETTER( uint8_t, u8, ARG_TYPE_U8 );
+    DEFINE_ARGPARSER_GETTER( int8_t, i8, ARG_TYPE_I8 );
+    DEFINE_ARGPARSER_GETTER( bool, b, ARG_TYPE_BOOL );
+    DEFINE_ARGPARSER_GETTER( char*, str, ARG_TYPE_STRING );
+
+    bool argparser_get_none( argparser_t* argparser, const char* identifier ) {
+        for ( size_t i = 0; i < argparser->args_length; i++ ) {
+            if ( !strcmp( argparser->args[i].meta.identifier, identifier ) ) {
+                if ( argparser->args[i].meta.type != ARG_TYPE_NONE ) {
+                    fprintf( stderr, "[WARNING]: getting none state from non-none argument %s\n", identifier );
+                }
+                return argparser->args[i].found;
+            }
+        }
+        fprintf( stderr, "[FATAL]: argument %s not found\n", identifier );
+        exit( EXIT_FAILURE );
+    }
+
+    bool argparser_found( argparser_t* argparser, const char* identifier ) {
+        for ( size_t i = 0; i < argparser->args_length; i++ ) {
+            if ( !strcmp( argparser->args[i].meta.identifier, identifier ) ) {
+                return argparser->args[i].found;
+            }
+        }
+        fprintf( stderr, "[FATAL]: argument %s not found\n", identifier );
+        exit( EXIT_FAILURE );
+    }
+#undef DEFINE_ARGPARSER_GETTER
 
 #ifdef __cplusplus
 }
